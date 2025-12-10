@@ -2,7 +2,7 @@
 
 ## Overview
 
-Automated configuration and hardening script for Debian servers with Active Directory integration, Docker compatibility, and continuous security audit chain.[^1][^2]
+Automated configuration and hardening script for Debian servers with Active Directory integration, Docker compatibility, and continuous security audit chain.
 
 ***
 
@@ -10,7 +10,7 @@ Automated configuration and hardening script for Debian servers with Active Dire
 
 ### 1. **Active Directory Integration**
 
-- Automated AD domain join via SSSD/Realmd[^3][^4]
+- Automated AD domain join via SSSD/Realmd
 - Kerberos authentication for domain users
 - AD group-based sudo rights management
 - Automatic home directory creation (PAM mkhomedir)
@@ -33,7 +33,7 @@ Automated configuration and hardening script for Debian servers with Active Dire
 - Custom MOTD with connection information
 
 
-### 4. **Kernel Hardening (Docker Compatible)**[^5][^1]
+### 4. **Kernel Hardening (Docker Compatible)**
 
 Optimized sysctl parameters:
 
@@ -44,7 +44,7 @@ Optimized sysctl parameters:
 - Kernel log access restriction (dmesg_restrict)
 
 
-### 5. **Continuous Security Audit Chain**[^2][^6]
+### 5. **Continuous Security Audit Chain**
 
 #### AIDE (Advanced Intrusion Detection Environment)
 
@@ -85,7 +85,7 @@ Optimized sysctl parameters:
     - Weekly Auditd reports
 
 
-### 8. **Permissions \& Access Controls**[^7][^1]
+### 8. **Permissions \& Access Controls**
 
 - Hardened sudoers permissions (0440)
 - Restrictive cron directory permissions (700)
@@ -132,7 +132,7 @@ Optimized sysctl parameters:
 
 ✅ **Complete automation**: Installation and configuration in single execution
 ✅ **Production-ready**: Tested and validated on real infrastructure
-✅ **Multi-layer security**: Kernel, network, application, audit[^2]
+✅ **Multi-layer security**: Kernel, network, application, audit
 ✅ **Docker compatible**: Hardening without container impact
 ✅ **Centralized management**: AD integration for authentication
 ✅ **Continuous monitoring**: Proactive email alerts
@@ -186,7 +186,7 @@ Optimized sysctl parameters:
 
 ### System Layer
 
-- Kernel hardening (sysctl)[^5]
+- Kernel hardening (sysctl)
 - ASLR enabled
 - Core dumps disabled
 - Restricted kernel logs access
@@ -200,7 +200,7 @@ Optimized sysctl parameters:
 - Legal access banners
 
 
-### Audit Layer[^6][^2]
+### Audit Layer
 
 - AIDE file integrity monitoring
 - RKHunter rootkit detection
@@ -345,6 +345,6 @@ echo "Test" | mail -s "Test Alert" root
 ***
 
 **Version**: 5.5
-**Compatibility**: Debian 11/12, Docker
+**Compatibility**: Debian 12/13, Docker
 **Maintenance**: Automated cron scripts (daily/weekly)
 **Support**: Two versions available (French/English, Named/Anonymous)
