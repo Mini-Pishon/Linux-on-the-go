@@ -1,6 +1,6 @@
 #!/bin/bash
 # -----------------------------------------------------------------------------
-# Debian Configuration and Hardening Script (v5.4 - Dynamic Users)
+# Debian Configuration and Hardening Script (v5.5 - Dynamic Users)
 # -----------------------------------------------------------------------------
 # This script prepares a Debian server with AD integration, system hardening,
 # and Docker compatibility, while enabling continuous audit chain (AIDE, RKHunter, Auditd).
@@ -16,6 +16,9 @@
 #
 # NOTE: Bootloader hardening (GRUB) must be performed manually (Phase 4)
 # -----------------------------------------------------------------------------
+
+set -o errexit
+set -o pipefail
 
 # --- 1. CONFIGURATION VARIABLES ---
 DOMAIN="example.com"
@@ -59,7 +62,7 @@ add_user_if_defined() {
     local user_var=$1
     local key_var=$2
     
-    if [ -n "${!user_var}" ]; then
+    if [[ -n "${!user_var}" ]]; then
         AD_USERS+=("${!user_var}")
         SSH_KEYS+=("${!key_var}")
     fi
@@ -73,7 +76,7 @@ add_user_if_defined "USER_4" "KEY_USER_4"
 add_user_if_defined "USER_5" "KEY_USER_5"
 
 # Verify at least one user is defined
-if [ ${#AD_USERS[@]} -eq 0 ]; then
+if [[ ${#AD_USERS[@]} -eq 0 ]]; then
     echo -e "${RED}ERROR: No user defined. Please configure at least USER_1 and KEY_USER_1${NC}"
     exit 1
 fi
@@ -84,12 +87,12 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== Starting configuration v5.4 (${#AD_USERS[@]} user(s) configured) ===${NC}"
+echo -e "${GREEN}=== Starting configuration v5.5 (${#AD_USERS[@]} user(s) configured) ===${NC}"
 
 # --- 3. SOURCES.LIST CONFIGURATION (FIRST!) ---
-echo -e "${GREEN}[1/12] Configuring sources.list...${NC}"
+echo -e "${GREEN}[1/13] Configuring sources.list...${NC}"
 SOURCES_FILE="/etc/apt/sources.list"
-if [ -f "$SOURCES_FILE" ]; then
+if [[ -f "$SOURCES_FILE" ]]; then
     cp "$SOURCES_FILE" "${SOURCES_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
     # Comment out all cdrom lines to prevent Release file errors
     sed -i 's/^deb cdrom/#deb cdrom/g' "$SOURCES_FILE"
@@ -100,7 +103,7 @@ else
 fi
 
 # --- 4. POSTFIX & KERBEROS PRE-CONFIGURATION (Non-Interactive) ---
-echo -e "${GREEN}[2/12] Pre-configuring Postfix & Kerberos (Non-Interactive)...${NC}"
+echo -e "${GREEN}[2/13] Pre-configuring Postfix & Kerberos (Non-Interactive)...${NC}"
 HOSTNAME=$(hostname)
 
 echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
@@ -115,7 +118,7 @@ echo "krb5-config krb5-config/add_servers_realm string ${DOMAIN^^}" | debconf-se
 echo "   ✓ Postfix and Kerberos pre-configured."
 
 # --- 5. UPDATE & INSTALL DEPENDENCIES ---
-echo -e "${GREEN}[3/12] Installing dependencies (AD, MTA, Audit)...${NC}"
+echo -e "${GREEN}[3/13] Installing dependencies (AD, MTA, Audit)...${NC}"
 
 DEBIAN_FRONTEND=noninteractive apt-get update 2>&1 | grep -v "cdrom" &>/dev/null
 
@@ -127,23 +130,79 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
   krb5-user acl auditd aide rkhunter postfix mailutils \
   audispd-plugins fail2ban 2>&1 | grep -v "cdrom"
 
-if [ $? -eq 0 ]; then
+if [[ $? -eq 0 ]]; then
     echo "   ✓ All packages installed successfully."
 else
     echo -e "${RED}   ✗ Error during package installation.${NC}"
     exit 1
 fi
 
-# --- 6. AD DOMAIN JOIN (With Secure Prompt) ---
-echo -e "${GREEN}[4/12] Joining Active Directory domain...${NC}"
+# --- 6. RKHUNTER CONFIGURATION FIX (Update Fix) ---
+echo -e "${GREEN}[4/13] Fixing RKHunter configuration...${NC}"
+
+# Fix update parameters in rkhunter.conf
+RKHUNTER_CONF="/etc/rkhunter.conf"
+
+if [[ -f "$RKHUNTER_CONF" ]]; then
+    # Backup configuration file
+    cp "$RKHUNTER_CONF" "${RKHUNTER_CONF}.bak"
+    
+    # Fix UPDATE_MIRRORS
+    if grep -q "^UPDATE_MIRRORS=" "$RKHUNTER_CONF"; then
+        sed -i 's/^UPDATE_MIRRORS=.*/UPDATE_MIRRORS=1/' "$RKHUNTER_CONF"
+    else
+        echo "UPDATE_MIRRORS=1" >> "$RKHUNTER_CONF"
+    fi
+    
+    # Fix MIRRORS_MODE
+    if grep -q "^MIRRORS_MODE=" "$RKHUNTER_CONF"; then
+        sed -i 's/^MIRRORS_MODE=.*/MIRRORS_MODE=0/' "$RKHUNTER_CONF"
+    else
+        echo "MIRRORS_MODE=0" >> "$RKHUNTER_CONF"
+    fi
+    
+    # Fix WEB_CMD
+    if grep -q "^WEB_CMD=" "$RKHUNTER_CONF"; then
+        sed -i 's|^WEB_CMD=.*|WEB_CMD=""|' "$RKHUNTER_CONF"
+    else
+        echo 'WEB_CMD=""' >> "$RKHUNTER_CONF"
+    fi
+    
+    echo "   ✓ RKHunter update parameters fixed."
+else
+    echo -e "${YELLOW}   ⚠ rkhunter.conf file not found.${NC}"
+fi
+
+# Fix mirrors.dat file
+MIRRORS_FILE="/var/lib/rkhunter/db/mirrors.dat"
+MIRRORS_DIR="/var/lib/rkhunter/db"
+
+# Create directory if needed
+mkdir -p "$MIRRORS_DIR"
+
+# Create/replace mirrors.dat file with correct servers
+cat > "$MIRRORS_FILE" << 'EOF_MIRRORS'
+Version:2021020602
+mirror=http://rkhunter.sourceforge.net
+remote=http://rkhunter.sourceforge.net
+EOF_MIRRORS
+
+if [[ -f "$MIRRORS_FILE" ]]; then
+    echo "   ✓ mirrors.dat file updated with correct servers."
+else
+    echo -e "${RED}   ✗ Error creating mirrors.dat file.${NC}"
+fi
+
+# --- 7. AD DOMAIN JOIN (With Secure Prompt) ---
+echo -e "${GREEN}[5/13] Joining Active Directory domain...${NC}"
 if ! realm list | grep -q "$DOMAIN"; then
     echo "Joining domain $DOMAIN as $AD_JOIN_USER..."
     read -s -p "Enter password for $AD_JOIN_USER@$DOMAIN: " AD_PASSWORD
     echo ""
     
-    echo "$AD_PASSWORD" | realm join --user=$AD_JOIN_USER $DOMAIN
+    echo "$AD_PASSWORD" | realm join --user="$AD_JOIN_USER" "$DOMAIN"
     
-    if [ $? -eq 0 ]; then
+    if [[ $? -eq 0 ]]; then
         echo "   ✓ Domain join successful."
     else
         echo -e "${RED}   ✗ Domain join failed. Check credentials and network.${NC}"
@@ -158,8 +217,8 @@ fi
 systemctl restart sssd
 sleep 2
 
-# --- 7. POSTFIX CONFIGURATION (Aliases) ---
-echo -e "${GREEN}[5/12] Configuring Postfix aliases...${NC}"
+# --- 8. POSTFIX CONFIGURATION (Aliases) ---
+echo -e "${GREEN}[6/13] Configuring Postfix aliases...${NC}"
 if ! grep -q "^root: $SECURITY_EMAIL" /etc/aliases; then
     echo "root: $SECURITY_EMAIL" >> /etc/aliases
     newaliases
@@ -168,19 +227,19 @@ else
     echo "   ℹ Alias already configured."
 fi
 
-# --- 8. SUDOERS & PERMISSIONS (Lynis Hardening) ---
-echo -e "${GREEN}[6/12] Configuring Sudoers and Critical Permissions...${NC}"
+# --- 9. SUDOERS & PERMISSIONS (Lynis Hardening) ---
+echo -e "${GREEN}[7/13] Configuring Sudoers and Critical Permissions...${NC}"
 SUDO_FILE="/etc/sudoers.d/ad_admins"
-echo "%$AD_SUDO_GROUP@$DOMAIN ALL=(ALL) ALL" > $SUDO_FILE
-chmod 0440 $SUDO_FILE
+echo "%$AD_SUDO_GROUP@$DOMAIN ALL=(ALL) ALL" > "$SUDO_FILE"
+chmod 0440 "$SUDO_FILE"
 chmod 0755 /etc/sudoers.d
 echo "   ✓ AD sudo group configured and permissions hardened."
 
 chmod 700 /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly
 echo "   ✓ Cron directories permissions hardened."
 
-# --- 9. USER MANAGEMENT & SSH KEYS (DYNAMIC) ---
-echo -e "${GREEN}[7/12] Creating profiles and injecting SSH keys (${#AD_USERS[@]} user(s))...${NC}"
+# --- 10. USER MANAGEMENT & SSH KEYS (DYNAMIC) ---
+echo -e "${GREEN}[8/13] Creating profiles and injecting SSH keys (${#AD_USERS[@]} user(s))...${NC}"
 
 configure_user_ssh() {
     local USER_FULL=$1
@@ -189,7 +248,7 @@ configure_user_ssh() {
     echo -e "${YELLOW}-> Processing $USER_FULL...${NC}"
 
     # Check if key is empty
-    if [ -z "$USER_KEY" ]; then
+    if [[ -z "$USER_KEY" ]]; then
         echo -e "${YELLOW}   ⚠ No SSH key provided for $USER_FULL, skipped.${NC}"
         return
     fi
@@ -200,10 +259,10 @@ configure_user_ssh() {
     fi
 
     USER_HOME=$(getent passwd "$USER_FULL" | cut -d: -f6)
-    [ -z "$USER_HOME" ] && USER_HOME="/home/$USER_FULL"
+    [[ -z "$USER_HOME" ]] && USER_HOME="/home/$USER_FULL"
     USER_GROUP=$(id -gn "$USER_FULL")
 
-    if [ ! -d "$USER_HOME" ]; then
+    if [[ ! -d "$USER_HOME" ]]; then
         mkdir -p "$USER_HOME"
         cp -r /etc/skel/. "$USER_HOME"
     fi
@@ -231,27 +290,27 @@ for i in "${!AD_USERS[@]}"; do
     configure_user_ssh "${AD_USERS[$i]}" "${SSH_KEYS[$i]}"
 done
 
-# --- 10. SSH & BANNER HARDENING ---
-echo -e "${GREEN}[8/12] SSH and Banner Hardening (Port $SSH_PORT)...${NC}"
+# --- 11. SSH & BANNER HARDENING ---
+echo -e "${GREEN}[9/13] SSH and Banner Hardening (Port $SSH_PORT)...${NC}"
 SSH_CONF="/etc/ssh/sshd_config"
-cp $SSH_CONF "$SSH_CONF.bak"
+cp "$SSH_CONF" "$SSH_CONF.bak"
 
-sed -i "s/^#\? *Port 22/Port $SSH_PORT/" $SSH_CONF
-if ! grep -q "^Port $SSH_PORT" $SSH_CONF; then
-    echo "Port $SSH_PORT" >> $SSH_CONF
+sed -i "s/^#\? *Port 22/Port $SSH_PORT/" "$SSH_CONF"
+if ! grep -q "^Port $SSH_PORT" "$SSH_CONF"; then
+    echo "Port $SSH_PORT" >> "$SSH_CONF"
 fi
 
-sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' $SSH_CONF
-sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' $SSH_CONF
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' $SSH_CONF
-sed -i 's/^#\?ClientAliveCountMax.*/ClientAliveCountMax 2/' $SSH_CONF
-sed -i 's/^#\?TCPKeepAlive.*/TCPKeepAlive no/' $SSH_CONF
-sed -i 's/^#\?AllowAgentForwarding.*/AllowAgentForwarding no/' $SSH_CONF
-sed -i 's/^#\?Banner.*/Banner \/etc\/issue\.net/' $SSH_CONF
-sed -i 's/^#\?PrintMotd.*/PrintMotd no/' $SSH_CONF
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONF"
+sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSH_CONF"
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' "$SSH_CONF"
+sed -i 's/^#\?ClientAliveCountMax.*/ClientAliveCountMax 2/' "$SSH_CONF"
+sed -i 's/^#\?TCPKeepAlive.*/TCPKeepAlive no/' "$SSH_CONF"
+sed -i 's/^#\?AllowAgentForwarding.*/AllowAgentForwarding no/' "$SSH_CONF"
+sed -i 's/^#\?Banner.*/Banner \/etc\/issue\.net/' "$SSH_CONF"
+sed -i 's/^#\?PrintMotd.*/PrintMotd no/' "$SSH_CONF"
 
-if ! grep -q "^PrintMotd" $SSH_CONF; then
-    echo "PrintMotd no" >> $SSH_CONF
+if ! grep -q "^PrintMotd" "$SSH_CONF"; then
+    echo "PrintMotd no" >> "$SSH_CONF"
 fi
 
 echo "   ✓ SSH configuration hardened."
@@ -261,8 +320,8 @@ echo "$LEGAL_BANNER" > /etc/issue
 echo "$LEGAL_BANNER" > /etc/issue.net
 echo "   ✓ Legal banners configured."
 
-# --- 11. FAIL2BAN & PAM ---
-echo -e "${GREEN}[9/12] Configuring Fail2Ban and PAM...${NC}"
+# --- 12. FAIL2BAN & PAM ---
+echo -e "${GREEN}[10/13] Configuring Fail2Ban and PAM...${NC}"
 if ! grep -q "pam_mkhomedir.so" /etc/pam.d/common-session; then
     echo "session required pam_mkhomedir.so skel=/etc/skel/ umask=0022" >> /etc/pam.d/common-session
     echo "   ✓ PAM mkhomedir configured."
@@ -279,11 +338,11 @@ EOF
 systemctl restart fail2ban
 echo "   ✓ Fail2Ban enabled on port $SSH_PORT."
 
-# --- 12. KERNEL HARDENING (Sysctl - Docker Compatible) ---
-echo -e "${GREEN}[10/12] Kernel Hardening (Sysctl) - Docker Compatible...${NC}"
+# --- 13. KERNEL HARDENING (Sysctl - Docker Compatible) ---
+echo -e "${GREEN}[11/13] Kernel Hardening (Sysctl) - Docker Compatible...${NC}"
 SYSCTL_CONF="/etc/sysctl.d/99-hardening.conf"
 
-cat << EOF > $SYSCTL_CONF
+cat << 'EOF' > "$SYSCTL_CONF"
 # =====================================================================
 # Kernel Hardening - Docker Compatible
 # =====================================================================
@@ -306,8 +365,8 @@ EOF
 sysctl --system &>/dev/null
 echo "   ✓ Kernel hardened (Docker compatible)."
 
-# --- 13. AUDIT CHAIN (AIDE, RKHunter, Auditd) ---
-echo -e "${GREEN}[11/12] Configuring Continuous Audit Chain...${NC}"
+# --- 14. AUDIT CHAIN (AIDE, RKHunter, Auditd) ---
+echo -e "${GREEN}[12/13] Configuring Continuous Audit Chain...${NC}"
 mkdir -p /var/log/aide /var/log/rkhunter
 
 echo "SKIP_DIRS=/dev /run /proc" >> /etc/rkhunter.conf
@@ -319,7 +378,7 @@ REPORT=$(/usr/bin/aide --check 2>&1)
 if echo "$REPORT" | grep -q 'changed\|added\|removed'; then
     echo -e "Changes detected by AIDE.\n\n$REPORT" | mail -s "SECURITY ALERT AIDE - Changes on $(hostname)" root
     exit 1
-elif [ $? -eq 2 ]; then
+elif [[ $? -eq 2 ]]; then
     echo -e "AIDE error.\n\n$REPORT" | mail -s "SECURITY ALERT AIDE - ERROR on $(hostname)" root
     exit 2
 fi
@@ -331,7 +390,7 @@ cat << 'EOF_RKHUNTER' > /etc/cron.daily/rkhunter-check
 #!/bin/bash
 REPORT_FILE=$(mktemp)
 /usr/bin/rkhunter --check --nocolors --report-warnings-only > "$REPORT_FILE"
-if [ $? -ne 0 ]; then
+if [[ $? -ne 0 ]]; then
     REPORT_CONTENT=$(cat "$REPORT_FILE")
     echo -e "Suspicious rootkits found.\n\n$REPORT_CONTENT" | mail -s "SECURITY ALERT RKHUNTER - Rootkit Suspicion on $(hostname)" root
     rm "$REPORT_FILE"
@@ -345,7 +404,7 @@ chmod +x /etc/cron.daily/rkhunter-check
 cat << 'EOF_RKHUNTER_UPD' > /etc/cron.weekly/rkhunter-update
 #!/bin/sh
 /usr/bin/rkhunter --update 
-if [ $? -ne 0 ]; then
+if [[ $? -ne 0 ]]; then
     echo "RKHunter update failed." | mail -s "ALERT RKHUNTER - UPDATE FAILED on $(hostname)" root
     exit 1
 fi
@@ -395,12 +454,12 @@ EOF_LOG_RKHUNTER
 
 echo "   ✓ Logrotate configured (biweekly)."
 
-# --- 14. CUSTOM MOTD CONFIGURATION ---
-echo -e "${GREEN}[12/13] Configuring custom MOTD...${NC}"
+# --- 15. CUSTOM MOTD CONFIGURATION ---
+echo -e "${GREEN}[13/13] Configuring custom MOTD...${NC}"
 
-if [ -d "/etc/update-motd.d" ]; then
+if [[ -d "/etc/update-motd.d" ]]; then
     for script in /etc/update-motd.d/*; do
-        [ -x "$script" ] && chmod -x "$script" 2>/dev/null
+        [[ -x "$script" ]] && chmod -x "$script" 2>/dev/null
     done
     echo "   ✓ Default MOTD scripts disabled."
 fi
@@ -411,7 +470,7 @@ cat > /etc/update-motd.d/99-custom << 'EOFMOTD'
 #!/bin/bash
 HOSTNAME=$(hostname)
 IP=$(hostname -I | awk '{print $1}')
-LAST_LOGON=$(last -Fw $USER | grep -v "gone - no logout" | head -n 1)
+LAST_LOGON=$(last -Fw "$USER" | grep -v "gone - no logout" | head -n 1)
 
 MOTD_LINES=(
 "Welcome to $HOSTNAME"
@@ -442,16 +501,16 @@ EOFMOTD
 chmod +x /etc/update-motd.d/99-custom
 echo "   ✓ Custom MOTD enabled."
 
-# --- 15. AUDIT DATABASE INITIALIZATION ---
-echo -e "${GREEN}[13/13] Initializing audit databases...${NC}"
+# --- 16. AUDIT DATABASE INITIALIZATION ---
+echo -e "${GREEN}[14/14] Initializing audit databases...${NC}"
 
 # Initialize AIDE (May take several minutes)
 echo -e "${YELLOW}   -> Initializing AIDE database (this may take time)...${NC}"
-if [ ! -f /var/lib/aide/aide.db ]; then
+if [[ ! -f /var/lib/aide/aide.db ]]; then
     aideinit
     
     # Verify the new database was created
-    if [ -f /var/lib/aide/aide.db.new ]; then
+    if [[ -f /var/lib/aide/aide.db.new ]]; then
         mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
         echo "   ✓ AIDE database initialized successfully."
     else
@@ -466,27 +525,28 @@ echo -e "${YELLOW}   -> Updating RKHunter database...${NC}"
 
 # Update rootkit signatures
 rkhunter --update &>/dev/null
-if [ $? -eq 0 ]; then
+if [[ $? -eq 0 ]]; then
     echo "   ✓ RKHunter signatures updated."
 else
-    echo -e "${YELLOW}   ⚠ RKHunter signature update failed (may require Internet connection).${NC}"
+    echo -e "${YELLOW}   ⚠ RKHunter signature update failed.${NC}"
+    echo -e "${YELLOW}      Check /var/log/rkhunter.log for details.${NC}"
 fi
 
 # Update system file properties
 rkhunter --propupd &>/dev/null
-if [ $? -eq 0 ]; then
+if [[ $? -eq 0 ]]; then
     echo "   ✓ RKHunter file properties recorded."
 else
     echo -e "${RED}   ✗ Error recording RKHunter properties.${NC}"
 fi
 
-# --- 16. FINALIZATION ---
+# --- 17. FINALIZATION ---
 echo -e "${GREEN}[FINAL] Restarting SSH and verification...${NC}"
 if sshd -t; then
     systemctl restart ssh
     echo ""
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║         ✓ CONFIGURATION v5.4 COMPLETED SUCCESSFULLY       ║${NC}"
+    echo -e "${GREEN}║         ✓ CONFIGURATION v5.5 COMPLETED SUCCESSFULLY       ║${NC}"
     echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║ • Configured users: ${#AD_USERS[@]}                                     ║${NC}"
     echo -e "${GREEN}║ • Active SSH port: $SSH_PORT                                  ║${NC}"
@@ -494,6 +554,7 @@ if sshd -t; then
     echo -e "${GREEN}║ • Audit chain: AIDE + RKHunter + Auditd                   ║${NC}"
     echo -e "${GREEN}║ • Audit databases: Initialized                            ║${NC}"
     echo -e "${GREEN}║ • Hardening: SSH, Kernel, Fail2Ban, Banners               ║${NC}"
+    echo -e "${GREEN}║ • RKHunter: Update configuration fixed                    ║${NC}"
     echo -e "${GREEN}║ • Email alerts: $SECURITY_EMAIL                   ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
