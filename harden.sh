@@ -13,8 +13,6 @@
 # 5. Kernel Hardening (Sysctl) while maintaining Docker compatibility
 # 6. Cron Scripts Configuration for Audit (Email Alerts)
 # 7. Logrotate Configuration for biweekly report retention
-#
-# NOTE: Bootloader hardening (GRUB) must be performed manually (Phase 4)
 # -----------------------------------------------------------------------------
 
 set -o errexit
@@ -542,30 +540,4 @@ fi
 
 # --- 17. FINALIZATION ---
 echo -e "${GREEN}[FINAL] Restarting SSH and verification...${NC}"
-if sshd -t; then
-    systemctl restart ssh
-    echo ""
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║         ✓ CONFIGURATION v5.5 COMPLETED SUCCESSFULLY       ║${NC}"
-    echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║ • Configured users: ${#AD_USERS[@]}                                     ║${NC}"
-    echo -e "${GREEN}║ • Active SSH port: $SSH_PORT                                  ║${NC}"
-    echo -e "${GREEN}║ • Custom MOTD: Enabled                                     ║${NC}"
-    echo -e "${GREEN}║ • Audit chain: AIDE + RKHunter + Auditd                   ║${NC}"
-    echo -e "${GREEN}║ • Audit databases: Initialized                            ║${NC}"
-    echo -e "${GREEN}║ • Hardening: SSH, Kernel, Fail2Ban, Banners               ║${NC}"
-    echo -e "${GREEN}║ • RKHunter: Update configuration fixed                    ║${NC}"
-    echo -e "${GREEN}║ • Email alerts: $SECURITY_EMAIL                   ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}⚠  IMPORTANT: Remember to open port $SSH_PORT on the firewall!${NC}"
-    echo -e "${YELLOW}⚠  NOTE: GRUB hardening (BOOT-5122) must be done manually.${NC}"
-    echo -e "${GREEN}⚠  INFO: Audit scripts can be tested with:${NC}"
-    echo -e "${GREEN}          sudo run-parts -v /etc/cron.daily${NC}"
-    echo -e "${GREEN}          sudo run-parts -v /etc/cron.weekly${NC}"
-    echo ""
-else
-    echo -e "${RED}✗ CRITICAL SSH ERROR: Invalid configuration.${NC}"
-    echo -e "${RED}  Restore with: mv $SSH_CONF.bak $SSH_CONF${NC}"
-    exit 1
-fi
+if s
