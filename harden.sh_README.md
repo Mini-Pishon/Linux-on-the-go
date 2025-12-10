@@ -152,7 +152,7 @@ Optimized sysctl parameters:
 
 ## Prerequisites
 
-- Freshly installed Debian 11/12
+- Freshly installed Debian 12/13
 - Network access to Active Directory domain controller
 - AD administrator account for domain join
 - Functional SMTP/Postfix server for alerts
